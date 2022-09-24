@@ -1,6 +1,5 @@
 import logging
 import pickle
-import select
 import struct
 from os.path import abspath, dirname, join
 from pickle import loads
@@ -90,6 +89,10 @@ class FeedStream:
                 daemon=True
             ).start()
 
+        if running and self._active_sessions == 0:
+            running[0].stop()
+            self.recording = False
+
         return self._active_sessions
 
     @active_sessions.setter
@@ -131,15 +134,11 @@ class FeedStream:
 
         while self.recording:
             try:
-                in_, out_, err_ = select.select(
-                    [client1, ], [client1, ], [], 5
-                )
-                if len(out_) > 0:
-                    data[0] = pickle.dumps(self._content_data)
-                    message_size = struct.pack("L", len(data[0]))
-                    client1.sendall(message_size + data[0])
+                data[0] = pickle.dumps(self._content_data)
+                message_size = struct.pack("L", len(data[0]))
+                client1.sendall(message_size + data[0])
 
-            except select.error:
+            except Exception:
                 logging.info(f"Disconnecting user: {user}")
                 self.active_sessions -= 1
                 break
@@ -159,6 +158,8 @@ class FeedStream:
 
             if content := loads(frame_data):
                 self.mouse_action(content)
+
+            sleep(.1)
 
     def mouse_action(self, content):
         event = {
