@@ -7,7 +7,7 @@ title = kiVNC
 package.name = kivnc
 
 # (str) Package domain (needed for android/ios packaging)
-package.domain = org.kivnc
+package.domain = org.kuzeyron
 
 # (str) Source code where the main.py live
 source.dir = .
@@ -37,7 +37,7 @@ version = 0.1
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy,pillow,numpy
+requirements = python3==3.10.5,hostpython3==3.10.5,kivy==master,pillow,numpy
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
@@ -294,7 +294,7 @@ android.allow_backup = True
 #
 
 # (str) python-for-android URL to use for checkout
-#p4a.url =
+p4a.url = https://github.com/misl6/python-for-android.git
 
 # (str) python-for-android fork to use in case if p4a.url is not specified, defaults to upstream (kivy)
 #p4a.fork = kivy

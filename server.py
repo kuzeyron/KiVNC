@@ -1,12 +1,15 @@
 import logging
 import pickle
+import select
 import struct
 from os.path import abspath, dirname, join
 from pickle import loads
 from socket import AF_INET, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET, socket
 from struct import calcsize, unpack
 from subprocess import check_output
-from threading import Thread
+from threading import Lock, Thread
+from threading import enumerate as enum
+from time import sleep
 
 from numpy import array
 from PIL import Image, ImageGrab
@@ -28,12 +31,37 @@ def server_init(host):
     return server
 
 
+def screenshot(scale_percent):
+    screenshot_ = ImageGrab.grab(all_screens=True)
+    screenshot = screenshot_.resize(
+        [
+            int(x * scale_percent / 100)
+            for x in screenshot_.size
+        ],
+        Image.Resampling.LANCZOS
+    )
+    screen = dict(
+        tuple(
+            float(value) if value.isdigit() else value
+            for value in item.split(":")
+        )
+        for item in xdotool_events(
+            ['getmouselocation']
+        ).split()
+    )
+    screen['total_size'] = screenshot_.size
+
+    return (array(screenshot), screen)
+
+
 class FeedStream:
-    active: bool = True
     ipv4_allowed: list = ['192.168.0.']
     scale_percent: int = 100
     screen_info: list = []
     size: tuple = ()
+    _content_data: tuple = ()
+    lock: object = None
+    recording: bool = False
 
     def __init__(self, **kwargs):
         host, port = kwargs.get('host', ('0.0.0.0', 4321))
@@ -41,18 +69,48 @@ class FeedStream:
         self.input_ = server_init((host, port + 1))
         self.scale_percent = kwargs.get('scale_percent', 100)
         logging.info("Initialized the socket protocol.")
+        self._active_sessions = 0
+        self.lock = Lock()
 
         if kwargs.get('threaded', False):
             Thread(target=self.listen, daemon=True).start()
         else:
             self.listen()
 
+    @property
+    def active_sessions(self):
+        running = [x for x in enum() if x.name == 'screenshooter']
+        if not all([running, self.recording]):
+            logging.info("Started capturing screenshots")
+            self.recording = True
+            Thread(
+                target=self.run_screenshots,
+                args=(self.lock, ),
+                name='screenshooter',
+                daemon=True
+            ).start()
+
+        return self._active_sessions
+
+    @active_sessions.setter
+    def active_sessions(self, value):
+        self._active_sessions = value
+
+    def run_screenshots(self, lock):
+        while self.recording:
+            lock.acquire()
+            self._content_data = screenshot(
+                self.scale_percent
+            )
+            lock.release()
+            sleep(.05)
+
     def listen(self):
-        while self.active:
+        while True:
             in_, address1 = self.output_.accept()
             out_, address2 = self.input_.accept()
-            in_.settimeout(60)
-            out_.settimeout(60)
+            in_.settimeout(10)
+            out_.settimeout(10)
 
             if all([
                 address1[0] == address2[0],
@@ -65,59 +123,42 @@ class FeedStream:
                     daemon=True
                 ).start()
 
-    def screenshot(self):
-        screenshot_ = ImageGrab.grab(all_screens=True)
-        screenshot = screenshot_.resize(
-            [
-                int(x * self.scale_percent / 100)
-                for x in screenshot_.size
-            ],
-            Image.Resampling.LANCZOS
-        )
-        screen = dict(
-            tuple(
-                float(value) if value.isdigit() else value
-                for value in item.split(":")
-            )
-            for item in xdotool_events(
-                ['getmouselocation']
-            ).split()
-        )
-        self.size = screen['total_size'] = screenshot_.size
-
-        return [array(screenshot), screen]
-
     def transmit_data(self, client1, client2, user):
-        logging.info("Feed started and ready for transfer")
+        logging.info(f"Feed started and ready for {user[0]}")
+        self.active_sessions += 1
         payload_size = calcsize("L")
         data = [b'', b'']
 
-        while self.active:
-            # try/except to ignore crashes silently
+        while self.recording:
             try:
-                data[0] = pickle.dumps(self.screenshot())
-                message_size = struct.pack("L", len(data[0]))
-                client1.sendall(message_size + data[0])
+                in_, out_, err_ = select.select(
+                    [client1, ], [client1, ], [], 5
+                )
+                if len(out_) > 0:
+                    data[0] = pickle.dumps(self._content_data)
+                    message_size = struct.pack("L", len(data[0]))
+                    client1.sendall(message_size + data[0])
 
-                while len(data[1]) < payload_size:
-                    data[1] += client2.recv(4096)
-
-                packed_msg_size = data[1][:payload_size]
-                data[1] = data[1][payload_size:]
-                msg_size = unpack("L", packed_msg_size)[0]
-
-                while len(data[1]) < msg_size:
-                    data[1] += client2.recv(4096)
-
-                frame_data = data[1][:msg_size]
-                data[1] = data[1][msg_size:]
-
-                if content := loads(frame_data):
-                    self.mouse_action(content)
-
-            except Exception:  # I would like having TimeoutError here instead
+            except select.error:
                 logging.info(f"Disconnecting user: {user}")
+                self.active_sessions -= 1
                 break
+
+            while len(data[1]) < payload_size:
+                data[1] += client2.recv(4096)
+
+            packed_msg_size = data[1][:payload_size]
+            data[1] = data[1][payload_size:]
+            msg_size = unpack("L", packed_msg_size)[0]
+
+            while len(data[1]) < msg_size:
+                data[1] += client2.recv(4096)
+
+            frame_data = data[1][:msg_size]
+            data[1] = data[1][msg_size:]
+
+            if content := loads(frame_data):
+                self.mouse_action(content)
 
     def mouse_action(self, content):
         event = {

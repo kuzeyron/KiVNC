@@ -86,7 +86,7 @@ class FeedReceiver(Widget):
             self.remote, self.port = self.host
             self.input_ = server_init((self.remote, self.port))
             self.output_ = server_init((self.remote, self.port + 1))
-            self.message = []
+            self.message = {}
             Thread(target=self.transmit_data, daemon=True).start()
         except Exception:
             Clock.schedule_once(self.setup_handler, 1)
