@@ -38,7 +38,7 @@ Builder.load_string('''
     size_hint: .9, .9
     pos_hint: {'center_x': .5, 'center_y': .5}
     FeedReceiver:
-        host: ('192.168.0.3', 6666)
+        host: ('192.168.0.8', 6666)
 
 ''')
 
