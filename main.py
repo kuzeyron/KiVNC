@@ -12,7 +12,7 @@ from kivy.core.image import Image as CoreImage
 from kivy.lang import Builder
 from kivy.properties import (BooleanProperty, ListProperty, NumericProperty,
                              ObjectProperty, StringProperty)
-from kivy.uix.relativelayout import RelativeLayout
+from kivy.uix.scatter import Scatter
 from kivy.uix.widget import Widget
 from PIL import Image as Pimage
 
@@ -35,29 +35,24 @@ Builder.load_string('''
             source: self.cursor_icon
 
 <Container>:
-    size_hint: .9, .9
-    pos_hint: {'center_x': .5, 'center_y': .5}
+    do_rotation: False
     FeedReceiver:
-        host: ('192.168.0.8', 6666)
+        host: ('192.168.x.2', 6666)
 
 ''')
 
 
 def coordinates_to_size(pos, sz, ws, extra=0):
-    return (
-        pos[0] / sz[0] * ws[0],
-        ws[1] - pos[1] / sz[1] * ws[1] - extra
-    )
+    return (pos[0] / sz[0] * ws[0],
+            ws[1] - pos[1] / sz[1] * ws[1] - extra)
 
 
 def size_to_coorinates(pos, sz, ws):
-    return (
-        pos[0] * sz[0] / ws[0],
-        sz[1] - pos[1] * sz[1] / ws[1]
-    )
+    return (pos[0] * sz[0] / ws[0],
+            sz[1] - pos[1] * sz[1] / ws[1])
 
 
-class Container(RelativeLayout):
+class Container(Scatter):
     pass
 
 
@@ -90,6 +85,9 @@ class FeedReceiver(Widget):
             Thread(target=self.transmit_data, daemon=True).start()
         except Exception:
             Clock.schedule_once(self.setup_handler, 1)
+
+    def on_kv_post(self, *largs):
+        self.pos = self.center
 
     def transmit_data(self, *largs):
         payload_size = calcsize("L")
@@ -126,35 +124,33 @@ class FeedReceiver(Widget):
         img = Pimage.fromarray(image)
         img.save(self._bytesio, format='png')
         self._bytesio.seek(0)
-
-        self.texture = CoreImage(
-            self._bytesio,
-            ext='png'
-        ).texture
-
+        self.texture = CoreImage(self._bytesio,
+                                 ext='png').texture
+        self.size = self.texture.size
         self._bytesio.seek(0)
         self._bytesio.flush()
 
         self.total_size = tsize = cursor['total_size']
-        pos = coordinates_to_size(
-            (cursor['x'], cursor['y']), tsize, self.size, self.cursor_size
-        )
+        pos = coordinates_to_size((cursor['x'], cursor['y']),
+                                  tsize, self.size, self.cursor_size)
 
         self.cursor_pos = pos
 
     def on_touch_down(self, touch):
+        '''
         if self.collide_point(*touch.pos):
-            pos = size_to_coorinates(
-                touch.pos, self.total_size, self.size
-            )
+            pos = size_to_coorinates(touch.pos, self.total_size, self.size)
             self.message = {'pos': pos, 'input': 1}
+        '''
+        pass
 
     def on_touch_move(self, touch):
+        '''
         if self.collide_point(*touch.pos):
-            pos = size_to_coorinates(
-                touch.pos, self.total_size, self.size
-            )
+            pos = size_to_coorinates(touch.pos, self.total_size, self.size)
             self.message = {'pos': pos, 'input': 2}
+        '''
+        pass
 
 
 if __name__ == '__main__':
