@@ -10,17 +10,29 @@ from struct import calcsize, unpack
 from subprocess import STDOUT, check_output
 from threading import Thread
 from threading import enumerate as enum
-from time import sleep
 
 from numpy import array
 from PIL import Image
+from PIL.ImageOps import posterize
 
+events: dict = {
+    1: "mousemove {0} {1} click {2}",  # click
+    2: "mousemove {0} {1} click {2} --repeat 2",  # doubleclick
+    3: "mousemove {0} {1}",  # move cursor
+    4: "type {0}",  # print texts
+    'left': 1,
+    'scroll': 2,
+    'right': 3
+}
 
-def xdotool(cmd):
+def xdotool(cmd, shell=False):
+    cmd.insert(0, 'xdotool')
+
     return check_output(
-        ['xdotool'] + cmd,
+        " ".join(cmd) if shell else cmd,
         encoding='utf8',
-        stderr=STDOUT
+        stderr=STDOUT,
+        shell=shell
     )
 
 
@@ -38,11 +50,12 @@ def screenshot(scale_percent, path):
     st = bool(stat(path[-1]).st_size)
     
     if co and st:
-        screenshot_ = Image.open(path[-1])
+        screenshot_ = posterize(Image.open(path[-1]), 5)
         screenshot = screenshot_.resize(
             [int(x * scale_percent / 100)
              for x in screenshot_.size],
-            Image.Resampling.LANCZOS)
+            Image.Resampling.LANCZOS
+        )
         screen = dict(
             tuple(float(value) if value.isdigit() else value
                 for value in item.split(":"))
@@ -123,7 +136,7 @@ class FeedStream:
     def transmit_data(self, client1, client2, user):
         logging.info("Feed started and ready for %s", user[0])
         time_start = datetime.now()
-        timeout = timedelta(seconds=10)
+        timeout = timedelta(seconds=30)
         self.active_sessions += 1
         payload_size = calcsize("L")
         data = [b'', b'']
@@ -139,24 +152,14 @@ class FeedStream:
                     if (now - time_start) > timeout:
                         break
                     data[1] += client2.recv(4096)
-                else:
-                    sleep(.2)
                 time_start = now
 
-            except Exception:
-                break
-
-            try:
                 packed_msg_size = data[1][:payload_size]
                 data[1] = data[1][payload_size:]
                 msg_size = unpack("L", packed_msg_size)[0]
 
                 while len(data[1]) < msg_size:
-                    now = datetime.now()
-                    if (now - time_start) > timeout:
-                        break
                     data[1] += client2.recv(4096)
-                time_start = now
 
                 frame_data = data[1][:msg_size]
                 data[1] = data[1][msg_size:]
@@ -171,18 +174,13 @@ class FeedStream:
         self.active_sessions -= 1
 
     def mouse_action(self, content):
-        event = {
-            1: "mousemove {0} {1} click {2}",
-            2: "mousemove {0} {1}"
-        }
-        behavior = content.get('behavior', 1)
-        pos = content.get('pos', (0, 0))
+        assignment = content['content']
+        input_type = content['input']
+        button = events[content.get('click', 'left')]
 
         xdotool(
-            event[
-                content.get('input', 1)
-            ].format(*pos, behavior).split()
-        )
+            events[input_type].format(*assignment, button).split(),
+            shell=input_type in {3})
 
 
 if __name__ == '__main__':
@@ -199,7 +197,7 @@ if __name__ == '__main__':
     makedirs(dirname(path[-1]), exist_ok=True)
     FeedStream(
         host=('0.0.0.0', 6666),
-        scale_percent=40,
+        scale_percent=70,
         threading=False,
         shot_path=path
     )
